@@ -1,69 +1,89 @@
 #!/bin/bash
 
-# Colors
-GREEN="\e[32m"
-RED="\e[31m"
-NC="\e[0m" # No Color
+set -e
 
-echo -e "${GREEN}==========================================${NC}"
-echo -e "     SYSTEM INSTALLATION STATUS CHECK"
-echo -e "${GREEN}==========================================${NC}"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+WORKDIR="/tmp/server-backup-$TIMESTAMP"
+FINAL_ARCHIVE="/root/full-server-backup-$TIMESTAMP.tar.gz"
 
-# Generic function to check installed commands
-check_installed() {
-    if command -v "$1" >/dev/null 2>&1; then
-        echo -e "[${GREEN}✔${NC}] $1 is installed"
-    else
-        echo -e "[${RED}✖${NC}] $1 is NOT installed"
-    fi
-}
+mkdir -p "$WORKDIR"
+
+echo "======================================"
+echo " Starting Full Server Backup"
+echo "======================================"
+
+# Website files
+
+if [ -d /var/www ]; then
+cp -a /var/www "$WORKDIR/"
+fi
+
+# Nginx
+
+if [ -d /etc/nginx ]; then
+cp -a /etc/nginx "$WORKDIR/"
+fi
+
+# SSL
+
+if [ -d /etc/letsencrypt ]; then
+cp -a /etc/letsencrypt "$WORKDIR/"
+fi
+
+# PHP
+
+if [ -d /etc/php ]; then
+cp -a /etc/php "$WORKDIR/"
+fi
+
+# SSH
+
+if [ -d /etc/ssh ]; then
+cp -a /etc/ssh "$WORKDIR/"
+fi
+
+# Crontab
+
+crontab -l > "$WORKDIR/root-crontab.txt" 2>/dev/null || true
+cp /etc/crontab "$WORKDIR/" 2>/dev/null || true
+
+# Database backup
+
+echo "Creating MySQL dump..."
+mysqldump --single-transaction --routines --triggers --events 
+--all-databases > "$WORKDIR/all-databases.sql"
+
+# Docker info
+
+docker ps -a > "$WORKDIR/docker-containers.txt" 2>/dev/null || true
+docker images > "$WORKDIR/docker-images.txt" 2>/dev/null || true
+docker volume ls > "$WORKDIR/docker-volumes.txt" 2>/dev/null || true
+
+# Find compose files
+
+find / -name "docker-compose.yml" 2>/dev/null > "$WORKDIR/docker-compose-files.txt" || true
+find / -name "compose.yml" 2>/dev/null >> "$WORKDIR/docker-compose-files.txt" || true
+
+# System info
+
+uname -a > "$WORKDIR/system-info.txt"
+df -h > "$WORKDIR/disk-usage.txt"
+free -h > "$WORKDIR/memory-info.txt"
+
+# Create final archive
+
+echo "Compressing backup..."
+tar -czpf "$FINAL_ARCHIVE" -C "$WORKDIR" .
+
+# Cleanup
+
+rm -rf "$WORKDIR"
 
 echo ""
-echo "--- Checking Web Server Components ---"
-
-# Standard checks
-check_installed apache2
-check_installed nginx
-check_installed php
-
-# Special check for php-fpm (because it's php8.1-fpm, php8.2-fpm, etc.)
-echo -n "Checking php-fpm: "
-if systemctl list-units --type=service | grep -q "php.*fpm"; then
-    echo -e "[${GREEN}✔${NC}] php-fpm is installed"
-else
-    echo -e "[${RED}✖${NC}] php-fpm is NOT installed"
-fi
-
-# MySQL or MariaDB
-if command -v mysql >/dev/null 2>&1; then
-    echo -e "[${GREEN}✔${NC}] mysql is installed"
-else
-    echo -e "[${RED}✖${NC}] mysql is NOT installed"
-fi
-
-if command -v mariadb >/dev/null 2>&1; then
-    echo -e "[${GREEN}✔${NC}] mariadb is installed"
-else
-    echo -e "[${RED}✖${NC}] mariadb is NOT installed"
-fi
-
-# Other tools
-check_installed composer
-check_installed node
-check_installed npm
-check_installed git
-check_installed curl
-check_installed ufw
-
-# Supervisor special detection
-echo -n "Checking supervisor: "
-if command -v supervisord >/dev/null 2>&1 || systemctl list-unit-files | grep -q supervisor.service; then
-    echo -e "[${GREEN}✔${NC}] supervisor is installed"
-else
-    echo -e "[${RED}✖${NC}] supervisor is NOT installed"
-fi
-
+echo "======================================"
+echo " BACKUP COMPLETED SUCCESSFULLY"
+echo "======================================"
+echo "Backup File:"
+echo "$FINAL_ARCHIVE"
 echo ""
-echo -e "${GREEN}==========================================${NC}"
-echo " CHECK COMPLETE "
-echo -e "${GREEN}==========================================${NC}"
+ls -lh "$FINAL_ARCHIVE"
